@@ -1,0 +1,100 @@
+name: Daily Frame Tracker Email
+
+on:
+  schedule:
+    - cron: '0 10 * * *'  # 6 AM Eastern (UTC-4 in summer)
+  workflow_dispatch:       # allows manual trigger for testing
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Supabase data and send email
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          GMAIL_USER: eguilesjr@gmail.com
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENT: ellis@graboyes.com
+        run: |
+          node -e "
+          const https = require('https');
+
+          const url = new URL(process.env.SUPABASE_URL + '/rest/v1/frames?select=*');
+
+          const options = {
+            hostname: url.hostname,
+            path: url.pathname + url.search,
+            headers: {
+              'apikey': process.env.SUPABASE_ANON_KEY,
+              'Authorization': 'Bearer ' + process.env.SUPABASE_ANON_KEY
+            }
+          };
+
+          https.get(options, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+              const frames = JSON.parse(data);
+              const total = frames.length;
+              const complete = frames.filter(f => f.status === 'Complete').length;
+              const inProgress = frames.filter(f => f.status === 'In Progress').length;
+              const received = frames.filter(f => f.status === 'Received').length;
+              const overdue = frames.filter(f => f.status === 'Overdue').length;
+              const open = frames.filter(f => !f.status || f.status === 'Open').length;
+
+              const areaA = frames.filter(f => f.area === 'Area A').length;
+              const areaB = frames.filter(f => f.area === 'Area B').length;
+              const areaC = frames.filter(f => f.area === 'Area C').length;
+              const areaD = frames.filter(f => f.area === 'Area D').length;
+
+              const today = new Date().toLocaleDateString('en-US', {
+                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+                timeZone: 'America/New_York'
+              });
+
+              const body = [
+                'Middlesex Frame Tracker — Daily Snapshot',
+                today,
+                '',
+                'STATUS SUMMARY',
+                'Total Frames:   ' + total,
+                'Complete:       ' + complete,
+                'In Progress:    ' + inProgress,
+                'Received:       ' + received,
+                'Overdue:        ' + overdue,
+                'Open:           ' + open,
+                '',
+                'BY AREA',
+                'Area A: ' + areaA,
+                'Area B: ' + areaB,
+                'Area C: ' + areaC,
+                'Area D: ' + areaD,
+                '',
+                'View live tracker: https://eguilesjr.github.io/Excel-JSON/'
+              ].join('\n');
+
+              // Send via Gmail SMTP using nodemailer
+              require('child_process').execSync('npm install nodemailer --prefix /tmp/nm', {stdio: 'ignore'});
+              const nodemailer = require('/tmp/nm/node_modules/nodemailer');
+
+              const transporter = nodemailer.createTransport({
+                service: 'gmail',
+                auth: {
+                  user: process.env.GMAIL_USER,
+                  pass: process.env.GMAIL_APP_PASSWORD
+                }
+              });
+
+              transporter.sendMail({
+                from: process.env.GMAIL_USER,
+                to: process.env.RECIPIENT,
+                subject: 'Frame Tracker Snapshot — ' + today,
+                text: body
+              }, (err, info) => {
+                if (err) { console.error(err); process.exit(1); }
+                console.log('Email sent:', info.response);
+              });
+            });
+          });
+          "
