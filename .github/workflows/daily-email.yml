@@ -35,7 +35,10 @@ jobs:
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
-              const frames = JSON.parse(data);
+              let parsed = JSON.parse(data);
+               const frames = Array.isArray(parsed) ? parsed : (parsed.data || []);
+               if (!Array.isArray(frames)) { console.error('Unexpected response:', JSON.stringify(parsed)); process.exit(1); }
+
               const total = frames.length;
               const complete = frames.filter(f => f.status === 'Complete').length;
               const inProgress = frames.filter(f => f.status === 'In Progress').length;
